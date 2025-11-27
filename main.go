@@ -14,50 +14,36 @@ func main() {
 	errorCount := 0
 
 	for {
-		resp, err := http.Get(statsURL)
-		if err != nil {
-			errorCount = handleError(errorCount, false)
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			errorCount = handleError(errorCount, false)
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			errorCount = handleError(errorCount, false)
-			continue
-		}
-
-		values, ok := parseStats(string(body))
+		values, ok := fetchStats()
 		if !ok {
-			errorCount = handleError(errorCount, false)
+			errorCount = handleError(errorCount)
 			continue
 		}
 
-		// успешный сценарий → сбрасываем счётчик и печатаем показатели
 		errorCount = 0
 		report(values)
 	}
 }
 
-func handleError(count int, force bool) int {
-	count++
-	if count >= 3 || force {
-		fmt.Println("Unable to fetch server statistic")
-		return 0
-	}
-	return count
-}
-
-func parseStats(raw string) ([7]int64, bool) {
+func fetchStats() ([7]int64, bool) {
 	var values [7]int64
 
-	parts := strings.Split(strings.TrimSpace(raw), ",")
+	resp, err := http.Get(statsURL)
+	if err != nil {
+		return values, false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return values, false
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return values, false
+	}
+
+	parts := strings.Split(strings.TrimSpace(string(body)), ",")
 	if len(parts) != len(values) {
 		return values, false
 	}
@@ -71,6 +57,15 @@ func parseStats(raw string) ([7]int64, bool) {
 	}
 
 	return values, true
+}
+
+func handleError(count int) int {
+	count++
+	if count >= 3 {
+		fmt.Println("Unable to fetch server statistic")
+		return 0
+	}
+	return count
 }
 
 func report(vals [7]int64) {
@@ -104,7 +99,7 @@ func report(vals [7]int64) {
 	if totalNet > 0 {
 		netPercent := usedNet * 100 / totalNet
 		if netPercent > 90 {
-			freeMbit := (totalNet - usedNet) * 8 / 1024 / 1024
+			freeMbit := (totalNet - usedNet) / 1000 / 1000
 			fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", freeMbit)
 		}
 	}
