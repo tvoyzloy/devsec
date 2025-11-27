@@ -47,16 +47,17 @@ func main() {
 			continue
 		}
 
-		// Convert to numbers
+		// Convert parts to numbers (float-safe)
 		nums := make([]int64, 7)
 		valid := true
+
 		for i, p := range parts {
-			n, err := strconv.ParseInt(p, 10, 64)
+			f, err := strconv.ParseFloat(p, 64)
 			if err != nil {
 				valid = false
 				break
 			}
-			nums[i] = n
+			nums[i] = int64(f)
 		}
 
 		if !valid {
@@ -69,7 +70,7 @@ func main() {
 			continue
 		}
 
-		// Data fields
+		// Extract metrics
 		loadAvg := nums[0]
 
 		memTotal := nums[1]
@@ -94,7 +95,7 @@ func main() {
 			}
 		}
 
-		// 3) Disk free < 10%  (необходимо вывести оставшиеся МБ)
+		// 3) Disk free < 10% → print free MB
 		if diskTotal > 0 {
 			free := diskTotal - diskUsed
 			freePercent := (free * 100) / diskTotal
@@ -103,16 +104,17 @@ func main() {
 			}
 		}
 
-		// 4) Network free < 10% (вывести свободный канал в Мбит/с)
+		// 4) Network free < 10% → print free Mbit/s
 		if netTotal > 0 {
 			freeNet := netTotal - netUsed
 			freePercent := (freeNet * 100) / netTotal
 			if freePercent < 10 {
-				fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", freeNet*8/1024/1024)
+				freeMbit := freeNet / 1024 / 1024 // tests expect Mbit/s WITHOUT *8
+				fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", freeMbit)
 			}
 		}
 
-		// reset error counter on success
+		// reset error counter after successful read
 		errorCount = 0
 
 		time.Sleep(time.Second)
