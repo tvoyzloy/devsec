@@ -9,74 +9,69 @@ import (
 	"time"
 )
 
-const statsURL = "http://srv.msk01.gigacorp.local/_stats"
+const (
+	statsURL        = "http://srv.msk01.gigacorp.local/_stats"
+	expectedParts   = 7
+	maxErrorRetries = 3
+	pollInterval    = time.Second
+)
 
 func main() {
 	errorCount := 0
 
 	for {
-		resp, err := http.Get(statsURL)
-		if err != nil {
-			errorCount = handleError(errorCount)
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			errorCount = handleError(errorCount)
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			errorCount = handleError(errorCount)
-			continue
-		}
-
-		values, ok := parseStats(body)
+		values, ok := fetchStats()
 		if !ok {
-			errorCount = handleError(errorCount)
+			errorCount++
+			if errorCount >= maxErrorRetries {
+				fmt.Println("Unable to fetch server statistic")
+				return
+			}
+			time.Sleep(pollInterval)
 			continue
 		}
 
 		errorCount = 0
 		report(values)
-		time.Sleep(time.Second)
+		time.Sleep(pollInterval)
 	}
 }
 
-func handleError(count int) int {
-	count++
-	if count >= 3 {
-		fmt.Println("Unable to fetch server statistic")
-		// exit once message is printed
-		panic("exit")
+func fetchStats() ([expectedParts]int64, bool) {
+	var values [expectedParts]int64
+
+	resp, err := http.Get(statsURL)
+	if err != nil {
+		return values, false
 	}
-	time.Sleep(time.Second)
-	return count
-}
+	defer resp.Body.Close()
 
-func parseStats(data []byte) ([7]int64, bool) {
-	var values [7]int64
+	if resp.StatusCode != http.StatusOK {
+		return values, false
+	}
 
-	parts := strings.Split(strings.TrimSpace(string(data)), ",")
-	if len(parts) != 7 {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return values, false
+	}
+
+	parts := strings.Split(strings.TrimSpace(string(body)), ",")
+	if len(parts) != expectedParts {
 		return values, false
 	}
 
 	for i, part := range parts {
-		val, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		number, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
 		if err != nil {
 			return values, false
 		}
-		values[i] = val
+		values[i] = number
 	}
 
 	return values, true
 }
 
-func report(vals [7]int64) {
+func report(vals [expectedParts]int64) {
 	loadAvg := vals[0]
 	totalMem := vals[1]
 	usedMem := vals[2]
@@ -107,7 +102,7 @@ func report(vals [7]int64) {
 	if totalNet > 0 {
 		netPercent := usedNet * 100 / totalNet
 		if netPercent > 90 {
-			freeMbit := (totalNet - usedNet) * 8 / 1024 / 1024
+			freeMbit := (totalNet - usedNet) / 1000 / 1000
 			fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", freeMbit)
 		}
 	}
