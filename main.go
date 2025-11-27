@@ -109,7 +109,7 @@ func main() {
 			freeNet := netTotal - netUsed
 			freePercent := (freeNet * 100) / netTotal
 			if freePercent < 10 {
-				freeMbit := freeNet / 1024 / 1024 // tests expect Mbit/s WITHOUT *8
+				freeMbit := freeNet * 8 / 1024 / 1024
 				fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", freeMbit)
 			}
 		}
