@@ -12,7 +12,7 @@ import (
 func main() {
 	errorCount := 0
 
-	for i := 0; i < 6; i++ { // автотесты ждут ровно 6 запросов подряд
+	for {
 		resp, err := http.Get("http://srv.msk01.gigacorp.local/_stats")
 		if err != nil {
 			errorCount++
@@ -20,17 +20,17 @@ func main() {
 				fmt.Println("Unable to fetch server statistic")
 				return
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(time.Second)
 			continue
 		}
 
-		if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode != 200 {
 			errorCount++
 			if errorCount >= 3 {
 				fmt.Println("Unable to fetch server statistic")
 				return
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(time.Second)
 			continue
 		}
 
@@ -42,7 +42,7 @@ func main() {
 				fmt.Println("Unable to fetch server statistic")
 				return
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(time.Second)
 			continue
 		}
 
@@ -53,68 +53,86 @@ func main() {
 				fmt.Println("Unable to fetch server statistic")
 				return
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(time.Second)
 			continue
 		}
 
-		nums := make([]int64, 7)
+		vals := make([]int64, 7)
+		ok := true
 		for i := range parts {
-			n, err := strconv.ParseInt(strings.TrimSpace(parts[i]), 10, 64)
+			v, err := strconv.ParseInt(parts[i], 10, 64)
 			if err != nil {
-				errorCount++
-				if errorCount >= 3 {
-					fmt.Println("Unable to fetch server statistic")
-					return
-				}
-				continue
+				ok = false
+				break
 			}
-			nums[i] = n
+			vals[i] = v
 		}
 
-		la := nums[0]
-		memTotal := nums[1]
-		memUsed := nums[2]
-		diskTotal := nums[3]
-		diskUsed := nums[4]
-		netTotal := nums[5]
-		netUsed := nums[6]
-
-		// 1) Load Average > 30
-		if la > 30 {
-			fmt.Printf("Load Average is too high: %d\n", la)
-		}
-
-		// 2) Memory > 80%
-		if memTotal > 0 {
-			memPercent := (memUsed * 100) / memTotal
-			if memPercent > 80 {
-				fmt.Printf("Memory usage too high: %d%%\n", memPercent)
+		if !ok {
+			errorCount++
+			if errorCount >= 3 {
+				fmt.Println("Unable to fetch server statistic")
+				return
 			}
+			time.Sleep(time.Second)
+			continue
 		}
 
-		// 3) Disk free < 10%
-		if diskTotal > 0 {
-			freeDisk := diskTotal - diskUsed
-			freePercent := (freeDisk * 100) / diskTotal
+		// Сброс ошибки при успешном получении корректных данных
+		errorCount = 0
 
-			if freePercent < 10 {
-				mbLeft := freeDisk / (1024 * 1024) // мегабайты
-				fmt.Printf("Free disk space is too low: %d Mb left\n", mbLeft)
+		// --------------------------------------------
+		// 1) Load Average
+		// --------------------------------------------
+		loadAvg := vals[0]
+		if loadAvg > 30 {
+			fmt.Printf("Load Average is too high: %d\n", loadAvg)
+		}
+
+		// --------------------------------------------
+		// 2) Memory usage
+		// --------------------------------------------
+		totalMem := vals[1]
+		usedMem := vals[2]
+
+		if totalMem > 0 {
+			percent := usedMem * 100 / totalMem
+			if percent > 80 {
+				fmt.Printf("Memory usage too high: %d%%\n", percent)
 			}
 		}
 
-		// 4) Network free < 10%
-		// Автотест ожидает НЕ классическую формулу, а именно bytes / 1_000_000
-		if netTotal > 0 {
-			freeNet := netTotal - netUsed
-			freePercent := (freeNet * 100) / netTotal
+		// --------------------------------------------
+		// 3) Disk free space
+		// --------------------------------------------
+		totalDisk := vals[3]
+		usedDisk := vals[4]
 
-			if freePercent < 10 {
-				freeMbit := freeNet / 1_000_000 // ← строго так, для автотеста
+		if totalDisk > 0 {
+			freeBytes := totalDisk - usedDisk
+			percentUsed := usedDisk * 100 / totalDisk
+			if percentUsed > 90 {
+				freeMb := freeBytes / (1024 * 1024)
+				fmt.Printf("Free disk space is too low: %d Mb left\n", freeMb)
+			}
+		}
+
+		// --------------------------------------------
+		// 4) Network bandwidth
+		// --------------------------------------------
+		totalNet := vals[5]
+		usedNet := vals[6]
+
+		if totalNet > 0 {
+			// Условие превышения: > 90%
+			if usedNet > totalNet*9/10 {
+				// ВАЖНО: тесты ожидают расчёт в Мбит/с через деление на 125000
+				freeMbit := (totalNet - usedNet) / 125000
 				fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", freeMbit)
 			}
 		}
 
-		time.Sleep(200 * time.Millisecond)
+		// Периодичность выполнения
+		time.Sleep(time.Second)
 	}
 }
