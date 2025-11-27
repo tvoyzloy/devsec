@@ -6,118 +6,106 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 )
+
+const statsURL = "http://srv.msk01.gigacorp.local/_stats"
 
 func main() {
 	errorCount := 0
 
 	for {
-		resp, err := http.Get("http://srv.msk01.gigacorp.local/_stats")
+		resp, err := http.Get(statsURL)
 		if err != nil {
-			errorCount++
-			if errorCount >= 3 {
-				fmt.Println("Unable to fetch server statistic")
-				return
-			}
-			time.Sleep(time.Second)
+			errorCount = handleError(errorCount, false)
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
-			errorCount++
-			if errorCount >= 3 {
-				fmt.Println("Unable to fetch server statistic")
-				return
-			}
-			time.Sleep(time.Second)
+			errorCount = handleError(errorCount, false)
 			continue
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			errorCount++
-			if errorCount >= 3 {
-				fmt.Println("Unable to fetch server statistic")
-				return
-			}
-			time.Sleep(time.Second)
+			errorCount = handleError(errorCount, false)
 			continue
 		}
 
-		parts := strings.Split(strings.TrimSpace(string(body)), ",")
-		if len(parts) != 7 {
-			errorCount++
-			if errorCount >= 3 {
-				fmt.Println("Unable to fetch server statistic")
-				return
-			}
-			time.Sleep(time.Second)
-			continue
-		}
-
-		vals := make([]int64, 7)
-		ok := true
-		for i := range parts {
-			v, err := strconv.ParseInt(strings.TrimSpace(parts[i]), 10, 64)
-			if err != nil {
-				ok = false
-				break
-			}
-			vals[i] = v
-		}
-
+		values, ok := parseStats(string(body))
 		if !ok {
-			errorCount++
-			if errorCount >= 3 {
-				fmt.Println("Unable to fetch server statistic")
-				return
-			}
-			time.Sleep(time.Second)
+			errorCount = handleError(errorCount, false)
 			continue
 		}
 
-		// data is valid → reset error counter
+		// успешный сценарий → сбрасываем счётчик и печатаем показатели
 		errorCount = 0
+		report(values)
+	}
+}
 
-		// 1) Load Average
-		loadAvg := vals[0]
-		if loadAvg > 30 {
-			fmt.Printf("Load Average is too high: %d\n", loadAvg)
+func handleError(count int, force bool) int {
+	count++
+	if count >= 3 || force {
+		fmt.Println("Unable to fetch server statistic")
+		return 0
+	}
+	return count
+}
+
+func parseStats(raw string) ([7]int64, bool) {
+	var values [7]int64
+
+	parts := strings.Split(strings.TrimSpace(raw), ",")
+	if len(parts) != len(values) {
+		return values, false
+	}
+
+	for i, part := range parts {
+		num, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil {
+			return values, false
 		}
+		values[i] = num
+	}
 
-		// 2) Memory usage
-		totalMem := vals[1]
-		usedMem := vals[2]
-		if totalMem > 0 {
-			percent := usedMem * 100 / totalMem
-			if percent > 80 {
-				fmt.Printf("Memory usage too high: %d%%\n", percent)
-			}
+	return values, true
+}
+
+func report(vals [7]int64) {
+	loadAvg := vals[0]
+	totalMem := vals[1]
+	usedMem := vals[2]
+	totalDisk := vals[3]
+	usedDisk := vals[4]
+	totalNet := vals[5]
+	usedNet := vals[6]
+
+	if loadAvg > 30 {
+		fmt.Printf("Load Average is too high: %d\n", loadAvg)
+	}
+
+	if totalMem > 0 {
+		memPercent := usedMem * 100 / totalMem
+		if memPercent > 80 {
+			fmt.Printf("Memory usage too high: %d%%\n", memPercent)
 		}
+	}
 
-		// 3) Disk free space
-		totalDisk := vals[3]
-		usedDisk := vals[4]
-		if totalDisk > 0 {
-			freeBytes := totalDisk - usedDisk
-			percentUsed := usedDisk * 100 / totalDisk
-			if percentUsed > 90 {
-				freeMb := freeBytes / (1024 * 1024)
-				fmt.Printf("Free disk space is too low: %d Mb left\n", freeMb)
-			}
+	if totalDisk > 0 {
+		diskPercent := usedDisk * 100 / totalDisk
+		if diskPercent > 90 {
+			freeMb := (totalDisk - usedDisk) / (1024 * 1024)
+			fmt.Printf("Free disk space is too low: %d Mb left\n", freeMb)
 		}
+	}
 
-		// 4) Network bandwidth
-		totalNet := vals[5]
-		usedNet := vals[6]
-		if totalNet > 0 && usedNet > totalNet*9/10 {
+	if totalNet > 0 {
+		netPercent := usedNet * 100 / totalNet
+		if netPercent > 90 {
 			freeMbit := (totalNet - usedNet) * 8 / 1024 / 1024
 			fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", freeMbit)
 		}
-
-		time.Sleep(time.Second)
 	}
 }
